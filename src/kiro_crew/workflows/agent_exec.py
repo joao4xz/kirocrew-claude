@@ -130,11 +130,22 @@ def build_agent_fn(
                 # Only the persist stays in a best-effort try: a write failure
                 # must not break the workflow run, but nothing else hides here.
                 try:
+                    from kiro_crew.acp.types import ACP_BACKEND_CLAUDE
+                    from kiro_crew.config.loader import KiroCrewConfig
+
+                    _wf_provider = (
+                        "claude_code"
+                        if KiroCrewConfig.load().agent.acp_backend == ACP_BACKEND_CLAUDE
+                        else "acp"
+                    )
+                except Exception:
+                    _wf_provider = "acp"
+                try:
                     await persist_token_record_async(
                         key,
                         opts.get("model") or default_model or "",
                         provider_last_turn_usage(provider),
-                        provider="acp",
+                        provider=_wf_provider,
                         surface="workflow",
                         agent=(read_effective_agent(provider)
                                or opts.get("agent") or default_agent or ""),

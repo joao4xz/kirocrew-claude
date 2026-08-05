@@ -1379,6 +1379,24 @@ class AgentConfig:
         default="acp",
         metadata=_meta("Provider", "LLM provider backend (KiroACP / kiro-cli).", enum=["acp"]),
     )
+    provider_base_url: str = field(
+        default="",
+        metadata=_meta(
+            "Provider Base URL",
+            "ANTHROPIC_BASE_URL for the 'claude' acp_backend. Empty inherits "
+            "the environment. Local endpoints (http://127.0.0.1, "
+            "http://192.168.x.x) are always allowed.",
+        ),
+    )
+    provider_api_key: str = field(
+        default="",
+        metadata=_meta(
+            "Provider API Key",
+            "ANTHROPIC_API_KEY for the 'claude' acp_backend. Empty inherits "
+            "the environment. Stored in config.json — prefer environment "
+            "variables for shared machines.",
+        ),
+    )
     mcp_registry_mode: bool = field(
         default=False,
         metadata=_meta(
@@ -1399,9 +1417,12 @@ class AgentConfig:
         default="",
         metadata=_meta(
             "ACP Backend",
-            "Which ACP agent to drive: '' = kiro-cli (default), 'kas' = kiro-agent. "
-            "KAS runs chat but has no native subagent progress reporting yet.",
-            enum=["", "kas"],
+            "Which ACP agent to drive: '' = kiro-cli (default), 'kas' = kiro-agent, "
+            "'claude' = claude-agent-acp (Claude Code over ACP, pointing at any "
+            "ANTHROPIC_BASE_URL via provider_base_url/provider_api_key — e.g. a "
+            "local router). KAS runs chat but has no native subagent progress "
+            "reporting yet.",
+            enum=["", "kas", "claude"],
         ),
     )
     default_agent: str = field(
@@ -6954,6 +6975,8 @@ class KiroCrewConfig:
                 role_efforts=coerce_role_efforts(agent_data.get("role_efforts")),
                 reasoning_effort=agent_data.get("reasoning_effort", ""),
                 provider=agent_data.get("provider", "acp"),
+                provider_base_url=agent_data.get("provider_base_url", ""),
+                provider_api_key=agent_data.get("provider_api_key", ""),
                 mcp_registry_mode=_safe_bool(agent_data.get("mcp_registry_mode", False), False),
                 acp_backend=_normalize_acp_backend(agent_data.get("acp_backend")),
                 default_agent=agent_data.get("default_agent", ""),
@@ -8095,11 +8118,27 @@ class KiroCrewConfig:
         model = self.agent.model
         if model == DEFAULT_MODEL:
             model = self._resolve_agent_model()
+        # Fork: with a custom base URL (router), "auto" cannot resolve — the
+        # adapter would fall back to its Bedrock default (claude-opus-5[1m]),
+        # which the router rejects. Fall back to the global config model.
+        provider_backend = self.agent.acp_backend
+        if (
+            provider_backend == "claude"
+            and (self.agent.provider_base_url or "").strip()
+            and model in ("", "auto", DEFAULT_MODEL)
+            and self.agent.model not in ("", "auto", DEFAULT_MODEL)
+        ):
+            model = self.agent.model
 
         sandbox = self.agent.sandbox
         tool_search = self.agent.tool_search
         tool_search_min_pct = self.agent.tool_search_min_pct
         tool_search_min_tokens = self.agent.tool_search_min_tokens
+        # Fork: acp_backend == "claude" drives claude-agent-acp through the
+        # (now-selectable) ACP_BACKEND_CLAUDE seam. (provider_backend is
+        # already computed above, from self.agent.acp_backend.)
+        provider_base_url = (self.agent.provider_base_url or "").strip()
+        provider_api_key = (self.agent.provider_api_key or "").strip()
         # Global default effort for new sessions. A per-slot override always
         # wins; this only fills in when the slot carries none, so a session that
         # has never touched the effort control still starts at the user's
@@ -8162,6 +8201,17 @@ class KiroCrewConfig:
                 m = model
             else:
                 m = self._resolve_named_agent_model(agent) or model
+            # Fork: with a custom base URL (router), "auto" must never reach
+            # the backend — the adapter resolves it to its Bedrock default
+            # (claude-opus-5[1m]) which the router rejects. Fall back to the
+            # config model.
+            if (
+                provider_backend == "claude"
+                and provider_base_url
+                and m in ("", "auto", DEFAULT_MODEL)
+                and self.agent.model not in ("", "auto", DEFAULT_MODEL)
+            ):
+                m = self.agent.model
             # Translation boundary (mirrors the _claude_code factory): the model
             # may be a canonical registry key (e.g. "opus-4.8-1m" — the wire /
             # dropdown value after /api/models canonicalization) OR an already-
@@ -8174,7 +8224,17 @@ class KiroCrewConfig:
             # …) are DISTINCT real kiro models and must pass through unchanged,
             # not get folded to Sonnet the way the claude_code path downgrades
             # them (the claude backend has no Haiku).
-            m = model_registry.to_acp_id(m) if m else m
+            # Fork: on the claude_code path the canonical keys ARE the wire
+            # format, so translate to the claude_code provider id instead.
+            # With a custom base URL (e.g. 9router) the model id is the
+            # router's own namespace (oc/deepseek-v4-flash-free) — never
+            # registry-translate, or the Bedrock-form global.anthropic.* id
+            # reaches a router that rejects it.
+            if provider_backend == "claude":
+                if not provider_base_url:
+                    m = model_registry.to_provider_id(m, "claude_code") if m else m
+            else:
+                m = model_registry.to_acp_id(m) if m else m
             # Thread the slot's effort into a per-model override so the kiro
             # cli.json overlay is written from it at spawn — without this, a
             # kiro cold start (or the handler's reset-then-respawn) would only
@@ -8192,6 +8252,14 @@ class KiroCrewConfig:
             _eff = reasoning_effort_override or base_effort
             if m and _eff and is_valid_effort(_eff) and model_supports_effort(m):
                 _eff_per_model[m] = _eff
+            # Fork: thread the acp_backend + ANTHROPIC_* config into the
+            # provider. extra_env wins over config values.
+            _env: dict[str, str] = dict(extra_env or {})
+            if provider_backend == "claude":
+                if provider_base_url and not _env.get("ANTHROPIC_BASE_URL"):
+                    _env["ANTHROPIC_BASE_URL"] = provider_base_url
+                if provider_api_key and not _env.get("ANTHROPIC_API_KEY"):
+                    _env["ANTHROPIC_API_KEY"] = provider_api_key
             return AcpProvider(
                 work_dir=wdir,
                 model=m,
@@ -8200,8 +8268,8 @@ class KiroCrewConfig:
                 sandbox_mode=sandbox,
                 session_key=session_key,
                 channel_id=channel_id,
-                extra_env=extra_env,
-                acp_backend=self.agent.acp_backend,
+                extra_env=_env,
+                acp_backend=provider_backend,
                 effort_per_model=_eff_per_model,
                 tool_search=tool_search,
                 tool_search_min_pct=tool_search_min_pct,

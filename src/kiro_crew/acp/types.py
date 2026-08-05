@@ -131,11 +131,13 @@ ACP_BACKENDS_KNOWN = frozenset(
     }
 )
 # What an operator may actually persist in ``agent.acp_backend``, which is a
-# narrower question than what the code understands: ``ACP_BACKEND_CLAUDE`` is a
-# dormant seam reached by its own provider, not something to select here. Config
-# resolution degrades an unselectable value to the default, so a typo costs a log
-# line rather than a gateway that will not start.
-ACP_BACKENDS_SELECTABLE = frozenset({ACP_BACKEND_KIRO, ACP_BACKEND_KAS})
+# narrower question than what the code understands. Config resolution degrades
+# an unselectable value to the default, so a typo costs a log line rather than
+# a gateway that will not start.
+# Fork: ``ACP_BACKEND_CLAUDE`` is selectable here so ``agent.acp_backend =
+# "claude"`` (plus ``agent.provider_base_url`` / ``provider_api_key``) can
+# point the claude-agent-acp seam at a custom Anthropic-compatible router.
+ACP_BACKENDS_SELECTABLE = frozenset({ACP_BACKEND_KIRO, ACP_BACKEND_KAS, ACP_BACKEND_CLAUDE})
 
 # ── Capability membership (harness-parity H6, H7) ──
 # Every capability a backend may claim is an OPT-IN set here, never a negation at
