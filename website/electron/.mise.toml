@@ -1,0 +1,7 @@
+[tools]
+# electron@43.2.0 / @electron/get@5.x / @electron-internal/extract-zip@1.x are
+# ESM-only and declare "engines": {"node": ">=22.12.0"}. Node < 22.12 can't
+# require() them (ERR_REQUIRE_ESM) and Electron's own install.js crashes
+# before downloading its binary. Node >= 22.12 added require()-of-ESM
+# interop, so pinning here is the actual fix — not a workaround script.
+node = "22"
