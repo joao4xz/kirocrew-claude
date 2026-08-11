@@ -1989,6 +1989,16 @@ class AcpClient:
         """
         if not self._is_claude:
             return []
+        # fork-local patch: claude-agent-acp >= 0.49 rejects the legacy stdio
+        # mcpServers shape ({name,command,args,env}) at session/new (Zod
+        # "Invalid params"), which hard-fails the whole session. Send none by
+        # default so chat works; native file/shell tools are unaffected. Set
+        # KIROCREW_CC_MCP=1 to restore injection once a compatible adapter (or a
+        # schema-matching transform) is in place.
+        import os as _os
+
+        if _os.environ.get("KIROCREW_CC_MCP", "").strip().lower() not in ("1", "true", "on", "yes"):
+            return []
         try:
             from kiro_crew.config.paths import kiro_agents_dir
 
