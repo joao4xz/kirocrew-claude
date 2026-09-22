@@ -12,8 +12,6 @@ name: Cleanup Temp Screenshots
 # If nothing is stale, it exits quietly (no branch, no PR).
 
 on:
-  schedule:
-    - cron: "0 8 * * 1" # Mondays 08:00 UTC
   workflow_dispatch:
     inputs:
       retention_days:

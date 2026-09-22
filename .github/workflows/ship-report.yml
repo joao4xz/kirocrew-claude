@@ -53,9 +53,6 @@
 name: Ship Report
 
 on:
-  schedule:
-    - cron: "0 16 * * *" # 9am PDT
-    - cron: "0 0 * * *" # 5pm PDT
   workflow_dispatch:
     inputs:
       lookback_hours:
